@@ -1,0 +1,1 @@
+/usr/bin/c++ -g -rdynamic CMakeFiles/chatcilent.dir/main.cpp.o -o /home/yang/Cluster-chat-room/bin/chatcilent  -lpthread 

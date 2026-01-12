@@ -1,0 +1,13 @@
+{
+    "files.associations": {
+        "cstdio": "cpp",
+        "forward_list": "cpp",
+        "list": "cpp",
+        "deque": "cpp",
+        "string": "cpp",
+        "vector": "cpp",
+        "functional": "cpp",
+        "ranges": "cpp",
+        "variant": "cpp"
+    }
+}

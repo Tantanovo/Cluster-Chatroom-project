@@ -1,0 +1,10 @@
+/home/yang/Cluster-chat-room/build/CMakeFiles/edit_cache.dir
+/home/yang/Cluster-chat-room/build/CMakeFiles/rebuild_cache.dir
+/home/yang/Cluster-chat-room/build/src/CMakeFiles/edit_cache.dir
+/home/yang/Cluster-chat-room/build/src/CMakeFiles/rebuild_cache.dir
+/home/yang/Cluster-chat-room/build/src/server/CMakeFiles/chatserver.dir
+/home/yang/Cluster-chat-room/build/src/server/CMakeFiles/edit_cache.dir
+/home/yang/Cluster-chat-room/build/src/server/CMakeFiles/rebuild_cache.dir
+/home/yang/Cluster-chat-room/build/src/client/CMakeFiles/chatcilent.dir
+/home/yang/Cluster-chat-room/build/src/client/CMakeFiles/edit_cache.dir
+/home/yang/Cluster-chat-room/build/src/client/CMakeFiles/rebuild_cache.dir

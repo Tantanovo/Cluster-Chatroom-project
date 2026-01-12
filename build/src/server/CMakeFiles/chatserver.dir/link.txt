@@ -1,0 +1,1 @@
+/usr/bin/c++ -g -rdynamic CMakeFiles/chatserver.dir/chatserver.cpp.o CMakeFiles/chatserver.dir/chatservice.cpp.o CMakeFiles/chatserver.dir/main.cpp.o CMakeFiles/chatserver.dir/mysql/mysql.cpp.o -o /home/yang/Cluster-chat-room/bin/chatserver  -lmuduo_net -lmuduo_base -lmysqlclient -lpthread 
