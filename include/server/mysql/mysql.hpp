@@ -11,8 +11,8 @@ private:
     MYSQL *_conn;
     // 数据库配置信息
     string server = "127.0.0.1";
-    string user = "root";
-    string password = "123456";
+    string user = "yzy";
+    string password = "770202";
     string dbname = "chat";
 
 public:
@@ -21,5 +21,6 @@ public:
     bool connect();// 连接数据库
     bool update(string sql);// 更新操作
     MYSQL_RES* query(string sql);// 查询操作
+    MYSQL* getConnection();// 获取连接
 };
 #endif

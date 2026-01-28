@@ -12,15 +12,16 @@ ChatServer::ChatServer(EventLoop *loop,const InetAddress &listenAddr,const strin
                 //设置线程数量
                 _server.setThreadNum(4);
 }   
-
+//启动服务
 void ChatServer::start(){
     _server.start();
 }
-//上报连接信息
+//上报连接信息的回调函数
 void ChatServer::onConnection(const TcpConnectionPtr &conn){
     if(conn->connected()){
         cout<<conn->peerAddress().toIpPort()<<" -> "<<conn->localAddress().toIpPort()<<" state:online"<<endl;
     }else{
+    ChatService::instance()->clientCloseException(conn);
        conn->shutdown();
         //TODO 用户退出，注销用户信息
     }

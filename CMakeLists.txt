@@ -13,6 +13,6 @@ include_directories(
     ${PROJECT_SOURCE_DIR}/include/server/muduo
     ${PROJECT_SOURCE_DIR}/thirdparty
 )
-
+add_subdirectory(muduo)
 #加载子目录
 add_subdirectory(src)
