@@ -1,6 +1,8 @@
 #include"chatservice.hpp"
 #include<string>
 #include<muduo/base/Logging.h>
+#include<vector>
+using namespace std;
 using namespace muduo;
 #include"public.hpp"
 ChatService* ChatService::instance(){
@@ -11,7 +13,15 @@ ChatService::ChatService(){
     //注册消息以及对应的Handler
     _msgHandlerMap.insert({LOGIN_MSG,bind(&ChatService::login,this,_1,_2,_3)});
     _msgHandlerMap.insert({REG_MSG,bind(&ChatService::reg,this,_1,_2,_3)});
+    _msgHandlerMap.insert({ONE_CHAT_MSG,bind(&ChatService::onechat,this,_1,_2,_3)});
+    _msgHandlerMap.insert({ADD_FRIEND_MSG,bind(&ChatService::addfriend,this,_1,_2,_3)});
 }
+
+void ChatService::reset(){
+    //把online状态的用户，设置成offline
+    _userModel.resetState();
+}
+
 msghandler ChatService::getHandler(int msgid){
     //记录错误日志，msgid没有对应的处理函数
     auto it=_msgHandlerMap.find(msgid);
@@ -55,6 +65,27 @@ void ChatService::login(const TcpConnectionPtr &conn,json &js,Timestamp time){
             response["errno"]=0;
             response["id"]=user.getId();
             response["name"]=user.getName();
+            //查询是否有离线消息
+            vector<string> vec=_offlineMsgModel.query(id);
+            if(!vec.empty()){
+                response["offlinemsg"]=vec;
+                //读取该用户的离线消息后，删除掉
+                _offlineMsgModel.remove(id);
+            }
+            //查询该用户的好友信息并返回
+            vector<User> vecFriend=_friendModel.query(id);
+            if(!vecFriend.empty()){
+                vector<string> vec2;
+                for(User &user:vecFriend){
+                    json js;
+                    js["id"]=user.getId();
+                    js["name"]=user.getName();
+                    js["state"]=user.getState();
+                    vec2.push_back(js.dump());
+                }
+                response["friends"]=vec2;
+            }
+
             conn->send(response.dump());
         }
     }
@@ -68,6 +99,7 @@ void ChatService::login(const TcpConnectionPtr &conn,json &js,Timestamp time){
     }
     LOG_INFO<<"do login service!";
 }
+
 //处理注册业务
 void ChatService::reg(const TcpConnectionPtr &conn,json &js,Timestamp time){
     string name=js["name"];
@@ -112,4 +144,29 @@ void ChatService::clientCloseException(const TcpConnectionPtr &conn){
             break;
         }
     }
+}
+
+void ChatService::onechat(const TcpConnectionPtr &conn,json &js,Timestamp time){
+    int toid=js["to"].get<int>();
+    //加锁，保证_userConnMap的线程安全
+    {
+        lock_guard<mutex> lock(_connMutex);
+        auto it=_userConnMap.find(toid);
+        if(it!=_userConnMap.end()){
+            //toid在线，转发消息 服务器主动推送消息给told用户
+            it->second->send(js.dump());
+            return;
+        }
+    }
+    //toid不在线，存储离线消息
+    _offlineMsgModel.insert(toid,js.dump());
+}
+
+//处理添加好友业务
+void ChatService::addfriend(const TcpConnectionPtr &conn,json &js,Timestamp time){
+    int userid=js["id"].get<int>();
+    int friendid=js["friendid"].get<int>();
+
+    //存储好友信息
+    _friendModel.insert(userid,friendid);
 }
