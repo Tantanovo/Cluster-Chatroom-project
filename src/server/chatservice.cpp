@@ -146,6 +146,7 @@ void ChatService::clientCloseException(const TcpConnectionPtr &conn){
     }
 }
 
+//处理一对一聊天业务
 void ChatService::onechat(const TcpConnectionPtr &conn,json &js,Timestamp time){
     int toid=js["to"].get<int>();
     //加锁，保证_userConnMap的线程安全
@@ -170,3 +171,43 @@ void ChatService::addfriend(const TcpConnectionPtr &conn,json &js,Timestamp time
     //存储好友信息
     _friendModel.insert(userid,friendid);
 }
+
+//创建群组业务
+void ChatService::creategroup(const TcpConnectionPtr &conn,json &js,Timestamp time){
+    int userid=js["id"].get<int>();
+    string groupname=js["groupname"];
+    string groupdesc=js["groupdesc"];
+    //存储新创建的群组信息
+    Group group(-1,groupname,groupdesc);
+    if(_groupModel.createGroup(group)){
+        //存储群组创建人信息
+        _groupModel.addGroup(userid,group.getId(),"creator");
+    }
+}
+
+//加入群组业务
+void ChatService::addgroup(const TcpConnectionPtr &conn,json &js,Timestamp time){
+    int userid=js["id"].get<int>();
+    int groupid=js["groupid"].get<int>();
+    _groupModel.addGroup(userid,groupid,"normal");
+}
+
+//群组聊天业务
+void ChatService::groupchat(const TcpConnectionPtr &conn,json &js,Timestamp time){
+    int userid=js["id"].get<int>();
+    int groupid=js["groupid"].get<int>();
+    //查询群组成员列表，除userid自己外，其他成员转发消息
+    vector<int> useridVec=_groupModel.queryGroupUsers(userid,groupid);
+    lock_guard<mutex> lock(_connMutex);
+    for(int id:useridVec){
+        //加锁，保证_userConnMap的线程安全        
+        auto it=_userConnMap.find(id);
+        if(it!=_userConnMap.end()){
+            //转发消息
+            it->second->send(js.dump());
+        }
+        else{
+            //该用户不在线，存储离线消息
+            _offlineMsgModel.insert(id,js.dump());
+        }
+    }

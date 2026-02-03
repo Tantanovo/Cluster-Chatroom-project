@@ -12,6 +12,9 @@ using namespace muduo::net;
 #include"friendmodel.hpp"
 #include"usermodel.hpp"
 #include"offlinemessagemodel.hpp"
+#include"groupmodel.hpp"
+#include"usermodel.hpp"
+#include"offlinemessagemodel.hpp"
 //表示处理消息的事件回调方法类型
 using msghandler=function<void(const TcpConnectionPtr &conn,json &js,Timestamp time)>;
 
@@ -32,6 +35,7 @@ private:
     UserModel _userModel;//数据操作类对象
     OfflineMessageModel _offlineMsgModel;//离线消息业务对象
     FriendModel _friendModel;//好友信息操作对象
+    GroupModel _groupModel;//群组信息操作对象
 
 public:
     static ChatService* instance();//获取单例对象的接口函数
@@ -40,6 +44,9 @@ public:
     void reg(const TcpConnectionPtr &conn,json &js,Timestamp time);//注册业务
     void onechat(const TcpConnectionPtr &conn,json &js,Timestamp time);//一对一聊天业务
     void addfriend(const TcpConnectionPtr &conn,json &js,Timestamp time);//添加好友业务
+    void creategroup(const TcpConnectionPtr &conn,json &js,Timestamp time);//创建群组业务
+    void addgroup(const TcpConnectionPtr &conn,json &js,Timestamp time);//加入群
+    void groupchat(const TcpConnectionPtr &conn,json &js,Timestamp time);//群聊业务
     void clientCloseException(const TcpConnectionPtr &conn);//客户端异常退出处理
     void reset();//服务器异常，业务重置方法
     msghandler getHandler(int msgid);//获取消息对应的处理器
