@@ -31,7 +31,7 @@ void readTaskHandler(int clientfd);
 //获取系统时间（聊天信息添加时间戳）
 string getCurrentTime();
 //主聊天页面程序
-void mainMenu();
+void mainMenu(int clientfd);
 
 //聊天客户端程序实现，main线程用作发送线程 子线程用作接收线程
 int main(int argc,char **argv){
@@ -149,7 +149,7 @@ int main(int argc,char **argv){
                             thread readTask(readTaskHandler,clientfd);
                             readTask.detach();
                             //进入主聊天页面
-                            mainMenu();
+                            mainMenu(clientfd);
                             isMainMenuRunning=false;//结束主菜单循环
                         }
                         else{
@@ -211,4 +211,90 @@ int main(int argc,char **argv){
         }
     }
     return 0;
+}
+
+//接收线程
+void readTaskHandler(int clientfd){
+    for(;;){
+        char buffer[1024]={0};
+        int len=recv(clientfd,buffer,1024,0);
+        if(len==-1||len==0){
+            close(clientfd);
+            exit(-1);
+        }
+
+        json js=json::parse(buffer);
+        if(ONE_CHAT_MSG==js["msgid"].get<int>()){
+            cout<<js["time"].get<string>()<<"["<<js["id"]<<"]"<<js["name"].get<string>()<<"said:"<<js["msg"].get<string>()<<endl;
+            continue;
+        }
+    }   
+}
+//显示当前登录成功用户的基本信息
+void showCurrentUserData(){
+    // TODO: 实现显示当前用户信息的功能
+}
+
+//"help" commend handler
+void help(int fd=0,string str="");
+//"chat" commend handler
+void chat(int,string);
+//"addfrind" commend handler
+void addfriend(int,string);
+//"creategroup" commend handler
+void creategroup(int,string);
+//"addgroup" commend handler
+void addgroup(int,string);
+//"groupchat" commend handler
+void groupchat(int,string);
+//"quit" commend handler
+void quit(int,string);
+
+//系统支持的客户端命令列表
+unordered_map<string,string>commandMap={
+    {"help","显示所有支持的命令,格式help"},
+    {"chat","一对一聊天,格式chat:friendid:message"},
+    {"addfriend","添加好友,格式addfriend:friendid"},
+    {"creategroup","创建群组,格式creategroup:groupname:groupdesc"},
+    {"addgroup","加入群组,格式addgroup:groupid"},
+    {"groupchat","群聊,格式groupchat:groupid:message"},
+    {"quit","注销,格式quit"}
+};
+
+//注册系统支持的客户端命令处理
+unordered_map<string,function<void(int,string)>> commandHandlerMap={
+    {"help",help},
+    {"chat",chat},
+    {"addfriend",addfriend},
+    {"creategroup",creategroup},
+    {"addgroup",addgroup},
+    {"groupchat",groupchat},
+    {"quit",quit}
+};
+
+//主聊天页面程序
+void mainMenu(int clientfd){
+    help();
+
+    char buffer[1024]={0};
+    for(;;){
+        cin.getline(buffer,1024);
+        string commandbuf(buffer);
+        string command;//存储命令
+        int idx=commandbuf.find(":");
+        if(idx==-1){
+            command=commandbuf;
+        }
+        else{
+            command=commandbuf.substr(0,idx);
+        }
+        auto it=commandHandlerMap.find(command);
+        if(it==commandHandlerMap.end()){
+            cerr<<"invalid input command!"<<endl;
+            continue;
+        }
+        //调用相应命令的事件处理回调，mainmenu对修改封闭，添加新功能不需要修改该函数
+        it->second(clientfd,commandbuf.substr(idx+1,commandbuf.size()-idx));//调用命令处理方法
+        
+    }
 }
