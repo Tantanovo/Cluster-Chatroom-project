@@ -86,6 +86,29 @@ void ChatService::login(const TcpConnectionPtr &conn,json &js,Timestamp time){
                 response["friends"]=vec2;
             }
 
+            //查询用户的群组信息
+            vector<Group> GroupuserVec=_groupModel.query(id);
+            if(!GroupuserVec.empty()){
+                vector<string> vec2;
+                for(Group &group:GroupuserVec){ 
+                    json grpjson;
+                    js["id"]=group.getId();
+                    js["groupname"]=group.getName();
+                    js["groupdesc"]=group.getDesc();
+                    vector<string>userV;
+                    for(Groupuser &user:group.getUsers()){
+                        json userjson;
+                        userjson["id"]=user.getId();
+                        userjson["name"]=user.getName();
+                        userjson["state"]=user.getState();
+                        userjson["role"]=user.getRole();
+                        userV.push_back(userjson.dump());
+                    }
+                    grpjson["users"]=userV;
+                    vec2.push_back(grpjson.dump());
+                }
+                response["groups"]=vec2;
+            }
             conn->send(response.dump());
         }
     }

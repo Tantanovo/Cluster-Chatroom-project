@@ -145,7 +145,21 @@ int main(int argc,char **argv){
                             }
                             //显示当前用户的基本信息
                             showCurrentUserData();
-                            //启动接收线程
+
+                            //显示当前用户的离线消息  个人聊天信息或者群组消息
+                            if(response.contains("offlinemsg")){
+                                vector<string> vec=response["offlinemsg"].get<vector<string>>();
+                                for(string &str:vec){
+                                    json js=json::parse(str);
+                                    if(ONE_CHAT_MSG==js["msgid"].get<int>()){
+                                        cout<<js["time"].get<string>()<<"["<<js["id"]<<"]"<<js["name"].get<string>()<<"said:"<<js["msg"].get<string>()<<endl;
+                                    }
+                                    else if(GROUP_CHAT_MSG==js["msgid"].get<int>()){
+                                        cout<<js["time"].get<string>()<<"["<<js["id"]<<"]"<<js["name"].get<string>()<<"in group["<<js["groupid"].get<int>()<<"]said:"<<js["msg"].get<string>()<<endl;
+                                    }
+                                }
+                            }
+                            //登陆成功，启动接收线程负责接收数据
                             thread readTask(readTaskHandler,clientfd);
                             readTask.detach();
                             //进入主聊天页面
@@ -222,17 +236,58 @@ void readTaskHandler(int clientfd){
             close(clientfd);
             exit(-1);
         }
-
+        //接收chatserver转发的数据，反序列化生成json数据对象
         json js=json::parse(buffer);
-        if(ONE_CHAT_MSG==js["msgid"].get<int>()){
+        int msgtype=js["msgid"].get<int>();
+        if(ONE_CHAT_MSG==msgtype){
             cout<<js["time"].get<string>()<<"["<<js["id"]<<"]"<<js["name"].get<string>()<<"said:"<<js["msg"].get<string>()<<endl;
             continue;
         }
+        else if(GROUP_CHAT_MSG==msgtype){
+            cout<<js["time"].get<string>()<<"["<<js["id"]<<"]"<<js["name"].get<string>()<<"in group["<<js["groupid"].get<int>()<<"]said:"<<js["msg"].get<string>()<<endl;
+            continue;
+        }
+        else if(LOGINOUT_MSG==msgtype){
+            if(js["id"].get<int>()==g_currentUser.getId()){
+                cout<<"you are loginout success!"<<endl;
+                g_currentUser.setState("offline");
+                continue;
+            }
+            else{
+                cout<<js["name"].get<string>()<<"is loginout success!"<<endl;
+                continue;
+            }   
+        int msg
     }   
 }
 //显示当前登录成功用户的基本信息
 void showCurrentUserData(){
-    // TODO: 实现显示当前用户信息的功能
+    cout<<"==================login user=================<<endl;
+    cout<<"current login user => id:: "<<g_currentUser.getId()<<endl;
+    cout<<"current login user => name:: "<<g_currentUser.getName()<<endl;
+    cout<<"current login user => state:: "<<g_currentUser.getState()<<endl;
+    cout<<"------------------friend list-----------------"<<endl;
+    if(!g_currentUserFriendList.empty()){
+        for(User &user:g_currentUserFriendList){
+           cout<<user.getId()<<":"<<user.getName()<<":"<<user.getState()<<endl;
+        }
+    }
+    else{
+        cout<<"you have no friend!"<<endl;
+    }
+    cout<<"-----------------group list-----------------"<<endl;
+    if(!g_currentUserGroupList.empty()){
+        for(Group &group:g_currentUserGroupList){
+            cout<<group.getId()<<":"<<group.getName()<<":"<<group.getDesc()<<endl;
+            for(Groupuser &user:group.getUsers()){
+               cout<<user.getId()<<":"<<user.getName()<<":"<<user.getState()<<":"<<user.getRole()<<endl;
+            }
+        }
+    }
+    else{
+        cout<<"you have no group!"<<endl;
+    }
+    cout<<"================================================="<<endl;
 }
 
 //"help" commend handler
@@ -247,8 +302,8 @@ void creategroup(int,string);
 void addgroup(int,string);
 //"groupchat" commend handler
 void groupchat(int,string);
-//"quit" commend handler
-void quit(int,string);
+//"loginout" commend handler
+void loginout(int,string);
 
 //系统支持的客户端命令列表
 unordered_map<string,string>commandMap={
@@ -258,7 +313,7 @@ unordered_map<string,string>commandMap={
     {"creategroup","创建群组,格式creategroup:groupname:groupdesc"},
     {"addgroup","加入群组,格式addgroup:groupid"},
     {"groupchat","群聊,格式groupchat:groupid:message"},
-    {"quit","注销,格式quit"}
+    {"loginout","注销,格式loginout"}
 };
 
 //注册系统支持的客户端命令处理
@@ -269,7 +324,7 @@ unordered_map<string,function<void(int,string)>> commandHandlerMap={
     {"creategroup",creategroup},
     {"addgroup",addgroup},
     {"groupchat",groupchat},
-    {"quit",quit}
+    {"loginout",loginout};
 };
 
 //主聊天页面程序
@@ -297,4 +352,122 @@ void mainMenu(int clientfd){
         it->second(clientfd,commandbuf.substr(idx+1,commandbuf.size()-idx));//调用命令处理方法
         
     }
+}
+
+void help(int,string){
+    cout<<"show command list>>>"<<endl;
+    for(auto &p:commandMap){
+        cout<<p.first<<":"<<p.second<<endl;
+    }
+    cout<<endl;
+}
+
+void addfriend(int clientfd,string str){
+    int friendid=stoi(str);
+    json js;
+    js["msgid"]=ADD_FRIEND_MSG;
+    js["id"]=g_currentUser.getId();
+    js["friendid"]=friendid;
+    string buffer=js.dump();
+    int len=send(clientfd,buffer.c_str(),strlen(buffer.c_str())+1,0);
+    if(len==-1){
+        cerr<<"send addfriend msg error:"<<buffer<<endl;    
+    }
+}
+
+void chat(int clientfd,string str){
+    int idx=str.find(":");
+    if(idx==-1){
+        cerr<<"chat command format error!"<<endl;
+        return;
+    }
+    int friendid=atoi(str.substr(0,idx).c_str());
+    string message=str.substr(idx+1,str.size()-idx);
+    json js;
+    js["msgid"]=ONE_CHAT_MSG;
+    js["id"]=g_currentUser.getId();
+    js["name"]=g_currentUser.getName();
+    js["toid"]=friendid;
+    js["msg"]=message;
+    js["time"]=getCurrentTime();
+    string buffer=js.dump();
+    int len=send(clientfd,buffer.c_str(),strlen(buffer.c_str())+1,0);
+    if(len==-1){
+        cerr<<"send chat msg error:"<<buffer<<endl;    
+    }
+}
+
+void creategroup(int clientfd,string str){
+    int idx=str.find(":");
+    if(idx==-1){
+        cerr<<"creategroup command format error!"<<endl;
+        return;
+    }
+    string groupname=str.substr(0,idx);
+    string groupdesc=str.substr(idx+1,str.size()-idx);
+    json js;
+    js["msgid"]=CREATE_GROUP_MSG;
+    js["id"]=g_currentUser.getId();
+    js["groupname"]=groupname;
+    js["groupdesc"]=groupdesc;
+    string buffer=js.dump();
+    int len=send(clientfd,buffer.c_str(),strlen(buffer.c_str())+1,0);
+    if(len==-1){
+        cerr<<"send addgroup msg error:"<<buffer<<endl;    
+    }
+}
+void addgroup(int clientfd,string str){
+    int groupid=stoi(str.c_str());
+    json js;
+    js["msgid"]=ADD_GROUP_MSG;
+    js["id"]=g_currentUser.getId();
+    js["groupid"]=groupid;
+    string buffer=js.dump();
+    int len=send(clientfd,buffer.c_str(),strlen(buffer.c_str())+1,0);
+    if(len==-1){
+        cerr<<"send addgroup msg error:"<<buffer<<endl;    
+    }
+}
+
+void groupchat(int clientfd,string str){
+    int idx1=str.find(":");
+    if(idx1==-1){
+        cerr<<"groupchat command format error!"<<endl;
+        return;
+    }
+    int groupid=stoi(str.substr(0,idx1));
+    string message=str.substr(idx1+1,str.size()-idx1);
+    json js;
+    js["msgid"]=GROUP_CHAT_MSG;
+    js["id"]=g_currentUser.getId();
+    js["name"]=g_currentUser.getName();
+    js["groupid"]=groupid;
+    js["msg"]=message;
+    js["time"]=getCurrentTime();
+    string buffer=js.dump();
+    int len=send(clientfd,buffer.c_str(),strlen(buffer.c_str())+1,0);
+    if(len==-1){
+        cerr<<"send groupchat msg error:"<<buffer<<endl;    
+    }
+}
+
+void loginout(int clientfd,string str){
+    json js;
+    js["msgid"]=LOGINOUT_MSG;
+    js["id"]=g_currentUser.getId();
+    string buffer=js.dump();
+    int len=send(clientfd,buffer.c_str(),strlen(buffer.c_str())+1,0);
+    if(len==-1){
+        cerr<<"send loginout msg error:"<<buffer<<endl;    
+    }
+}
+
+string getCurrentTime(){
+    auto tt=chrono::system_clock::to_time_t(chrono::system_clock::now());
+    struct tm *ptm=localtime(&tt);
+    char date[60]={0};
+    sprintf(date,"%d-%02d-%02d %02d:%02d:%02d",
+        (1900+(int)ptm->tm_year),(1+(int)ptm->tm_mon),ptm->tm_mday,
+        ptm->tm_hour,ptm->tm_min,ptm->tm_sec);
+    return string(date);
 }
