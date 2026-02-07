@@ -47,6 +47,7 @@ public:
     void creategroup(const TcpConnectionPtr &conn,json &js,Timestamp time);//创建群组业务
     void addgroup(const TcpConnectionPtr &conn,json &js,Timestamp time);//加入群
     void groupchat(const TcpConnectionPtr &conn,json &js,Timestamp time);//群聊业务
+    void loginout(const TcpConnectionPtr &conn,json &js,Timestamp time);//处理注销业务
     void clientCloseException(const TcpConnectionPtr &conn);//客户端异常退出处理
     void reset();//服务器异常，业务重置方法
     msghandler getHandler(int msgid);//获取消息对应的处理器

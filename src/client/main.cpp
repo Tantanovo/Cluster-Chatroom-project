@@ -25,6 +25,8 @@ vector<User> g_currentUserFriendList;
 vector<Group> g_currentUserGroupList;
 //显示当前登录成功用户的基本信息
 void showCurrentUserData();
+//控制主菜单页面程序
+bool isMainMenuRunning=false;
 
 //接收线程
 void readTaskHandler(int clientfd);
@@ -62,7 +64,6 @@ int main(int argc,char **argv){
     }
     cout<<"connect server success!"<<endl;
     //登录注册主菜单
-    bool isMainMenuRunning=true;//主菜单运行状态标志
     while(isMainMenuRunning){
         cout<<"======================"<<endl;
         cout<<"1. login"<<endl;
@@ -108,6 +109,8 @@ int main(int argc,char **argv){
                             g_currentUser.setState("online");
                             //记录当前用户的好友列表信息
                             if(response.contains("friends")){
+                                //初始化
+                                g_currentUserFriendList.clear();
                                 vector<string> vec=response["friends"].get<vector<string>>();
                                 for(string &str:vec){
                                     json js=json::parse(str);
@@ -120,6 +123,8 @@ int main(int argc,char **argv){
                             }
                             //记录当前用户的群组列表信息
                             if(response.contains("groups")){
+                                //初始化
+                                g_currentUserGroupList.clear();
                                 vector<string> vec=response["groups"].get<vector<string>>();
                                 for(string &str:vec){
                                     json js=json::parse(str);
@@ -159,12 +164,16 @@ int main(int argc,char **argv){
                                     }
                                 }
                             }
-                            //登陆成功，启动接收线程负责接收数据
-                            thread readTask(readTaskHandler,clientfd);
-                            readTask.detach();
+                            //登陆成功，启动接收线程负责接收数据 该线程只启动一次
+                            static int threadnumber=0;
+                            if(threadnumber==0){
+                                thread readTask(readTaskHandler,clientfd);
+                                readTask.detach();
+                                threadnumber++;
+                            }   
                             //进入主聊天页面
+                            isMainMenuRunning=true;
                             mainMenu(clientfd);
-                            isMainMenuRunning=false;//结束主菜单循环
                         }
                         else{
                             //登录失败
@@ -231,7 +240,7 @@ int main(int argc,char **argv){
 void readTaskHandler(int clientfd){
     for(;;){
         char buffer[1024]={0};
-        int len=recv(clientfd,buffer,1024,0);
+        int len=recv(clientfd,buffer,1024,0);//阻塞了
         if(len==-1||len==0){
             close(clientfd);
             exit(-1);
@@ -257,7 +266,10 @@ void readTaskHandler(int clientfd){
                 cout<<js["name"].get<string>()<<"is loginout success!"<<endl;
                 continue;
             }   
-        int msg
+        }
+        else{
+            cout<<"recv unknown msgtype:"<<msgtype<<endl;
+        }
     }   
 }
 //显示当前登录成功用户的基本信息
@@ -459,6 +471,9 @@ void loginout(int clientfd,string str){
     int len=send(clientfd,buffer.c_str(),strlen(buffer.c_str())+1,0);
     if(len==-1){
         cerr<<"send loginout msg error:"<<buffer<<endl;    
+    }
+    else{
+        isMainMenuRunning=false;
     }
 }
 

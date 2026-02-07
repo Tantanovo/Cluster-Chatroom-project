@@ -11,10 +11,18 @@ ChatService* ChatService::instance(){
 }
 ChatService::ChatService(){
     //注册消息以及对应的Handler
+
+    //用户基本业务管理相关事件处理回调注册
     _msgHandlerMap.insert({LOGIN_MSG,bind(&ChatService::login,this,_1,_2,_3)});
+    _msgHandlerMap.insert({LOGINOUT_MSG,bind(&ChatService::login,this,_1,_2,_3)})
     _msgHandlerMap.insert({REG_MSG,bind(&ChatService::reg,this,_1,_2,_3)});
     _msgHandlerMap.insert({ONE_CHAT_MSG,bind(&ChatService::onechat,this,_1,_2,_3)});
     _msgHandlerMap.insert({ADD_FRIEND_MSG,bind(&ChatService::addfriend,this,_1,_2,_3)});
+
+    //群组业务管理相关事件处理回调注册
+    _msgHandlerMap.insert({CREATE_GROUP_MSG,bind(&ChatService::creategroup,this,_1,_2,_3)});
+    _msgHandlerMap.insert({ADD_GROUP_MSG,bind(&ChatService::addgroup,this,_1,_2,_3)});
+    _msgHandlerMap.insert({GROUP_CHAT_MSG,bind(&ChatService::groupchat,this,_1,_2,_3)});
 }
 
 void ChatService::reset(){
@@ -103,7 +111,7 @@ void ChatService::login(const TcpConnectionPtr &conn,json &js,Timestamp time){
                         userjson["state"]=user.getState();
                         userjson["role"]=user.getRole();
                         userV.push_back(userjson.dump());
-                    }
+                    } 
                     grpjson["users"]=userV;
                     vec2.push_back(grpjson.dump());
                 }
@@ -147,6 +155,23 @@ void ChatService::reg(const TcpConnectionPtr &conn,json &js,Timestamp time){
         response["errno"]=1;
         conn->send(response.dump());
     }
+}
+
+//处理注销业务
+void ChatService::loginout(const TcpConnectionPtr &conn,json &js,Timestamp time){
+    int userid=js["id"].get<int>();
+    {
+        lock_guard<mutex> lock(_connMutex);
+        auto it=_userConnMap.find(userid);
+        if(it!=_userConnMap.end()){
+            //从map表删除用户的连接信息
+            _userConnMap.erase(it);
+            //更新用户的状态信息为offline
+        }
+    }
+    //更新用户的状态信息为offline
+    User user(userid,"","offline");
+    _userModel.updatestate(user);
 }
 
 //处理客户端异常退出
