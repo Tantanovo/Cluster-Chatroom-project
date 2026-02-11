@@ -9,6 +9,7 @@ using json=nlohmann::json;
 using namespace std;
 using namespace muduo;
 using namespace muduo::net;
+#include"redis.hpp"             
 #include"friendmodel.hpp"
 #include"usermodel.hpp"
 #include"offlinemessagemodel.hpp"
@@ -36,6 +37,7 @@ private:
     OfflineMessageModel _offlineMsgModel;//离线消息业务对象
     FriendModel _friendModel;//好友信息操作对象
     GroupModel _groupModel;//群组信息操作对象
+    Redis _redis;//redis数据库操作对象
 
 public:
     static ChatService* instance();//获取单例对象的接口函数
@@ -49,6 +51,7 @@ public:
     void groupchat(const TcpConnectionPtr &conn,json &js,Timestamp time);//群聊业务
     void loginout(const TcpConnectionPtr &conn,json &js,Timestamp time);//处理注销业务
     void clientCloseException(const TcpConnectionPtr &conn);//客户端异常退出处理
+    void handleredissubscribemessage(int userid,string msg);//从redis消息队列中拉取离线消息
     void reset();//服务器异常，业务重置方法
     msghandler getHandler(int msgid);//获取消息对应的处理器
     

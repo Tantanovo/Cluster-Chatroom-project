@@ -23,6 +23,11 @@ ChatService::ChatService(){
     _msgHandlerMap.insert({CREATE_GROUP_MSG,bind(&ChatService::creategroup,this,_1,_2,_3)});
     _msgHandlerMap.insert({ADD_GROUP_MSG,bind(&ChatService::addgroup,this,_1,_2,_3)});
     _msgHandlerMap.insert({GROUP_CHAT_MSG,bind(&ChatService::groupchat,this,_1,_2,_3)});
+
+    if(_redis.connect()){
+        //初始化消息回调
+        _redis.init_notify_handler(bind(&ChatService::handleRedisSubscribeMessage,this,_1,_2)); 
+    }
 }
 
 void ChatService::reset(){
@@ -63,6 +68,8 @@ void ChatService::login(const TcpConnectionPtr &conn,json &js,Timestamp time){
                 lock_guard<mutex> lock(_connMutex);
                 _userConnMap.insert({id,conn});
             }
+            //将用户id和通道号绑定，用于后续的消息推送
+            _redis.subscribe(id);   
             
             //登录成功 更新用户状态信息 state offline=>online
             user.setState("online");
@@ -169,6 +176,9 @@ void ChatService::loginout(const TcpConnectionPtr &conn,json &js,Timestamp time)
             //更新用户的状态信息为offline
         }
     }
+    //取消订阅通道
+    _redis.unsubscribe(userid); 
+
     //更新用户的状态信息为offline
     User user(userid,"","offline");
     _userModel.updatestate(user);
@@ -192,6 +202,8 @@ void ChatService::clientCloseException(const TcpConnectionPtr &conn){
             break;
         }
     }
+    //取消订阅通道
+    _redis.unsubscribe(userid); 
 }
 
 //处理一对一聊天业务
@@ -206,6 +218,13 @@ void ChatService::onechat(const TcpConnectionPtr &conn,json &js,Timestamp time){
             it->second->send(js.dump());
             return;
         }
+    }
+    //查询toid是否在线
+    User user=_userModel.query(toid);
+    if(user.getState()=="online"){
+        //toid在线，存储离线消息
+        redis.publish(toid,js.dump());
+        return;
     }
     //toid不在线，存储离线消息
     _offlineMsgModel.insert(toid,js.dump());
@@ -255,7 +274,28 @@ void ChatService::groupchat(const TcpConnectionPtr &conn,json &js,Timestamp time
             it->second->send(js.dump());
         }
         else{
-            //该用户不在线，存储离线消息
-            _offlineMsgModel.insert(id,js.dump());
+            //查询toid是否在线
+            User user=_userModel.query(id);
+            if(user.getState()=="online"){
+                //toid在线，存储离线消息
+                redis.publish(id,js.dump());
+            }
+            else{
+                //toid不在线，存储离线消息
+                _offlineMsgModel.insert(id,js.dump());
+            }
         }
+    }
+
+    //从redis消息队列中拉取离线消息
+    void ChatService::handleredissubscribemessage(int userid,string msg){
+        lock_guard<mutex> lock(_connMutex);
+        auto it=_userConnMap.find(userid);
+        if(it!=_userConnMap.end()){
+            //转发消息
+            it->second->send(msg);
+            return;
+        }
+        //存储离线消息
+        _offlineMsgModel.insert(userid,msg);
     }
