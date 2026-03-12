@@ -37,7 +37,7 @@ private:
     OfflineMessageModel _offlineMsgModel;//离线消息业务对象
     FriendModel _friendModel;//好友信息操作对象
     GroupModel _groupModel;//群组信息操作对象
-    Redis _redis;//redis数据库操作对象
+    redis _redis;//redis数据库操作对象
 
 public:
     static ChatService* instance();//获取单例对象的接口函数

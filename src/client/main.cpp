@@ -274,7 +274,7 @@ void readTaskHandler(int clientfd){
 }
 //显示当前登录成功用户的基本信息
 void showCurrentUserData(){
-    cout<<"==================login user=================<<endl;
+    cout<<"==================login user================="<<endl;
     cout<<"current login user => id:: "<<g_currentUser.getId()<<endl;
     cout<<"current login user => name:: "<<g_currentUser.getName()<<endl;
     cout<<"current login user => state:: "<<g_currentUser.getState()<<endl;
@@ -336,7 +336,7 @@ unordered_map<string,function<void(int,string)>> commandHandlerMap={
     {"creategroup",creategroup},
     {"addgroup",addgroup},
     {"groupchat",groupchat},
-    {"loginout",loginout};
+    {"loginout",loginout}
 };
 
 //主聊天页面程序

@@ -2,6 +2,7 @@
 #include<string>
 #include<muduo/base/Logging.h>
 #include<vector>
+
 using namespace std;
 using namespace muduo;
 #include"public.hpp"
@@ -14,7 +15,7 @@ ChatService::ChatService(){
 
     //用户基本业务管理相关事件处理回调注册
     _msgHandlerMap.insert({LOGIN_MSG,bind(&ChatService::login,this,_1,_2,_3)});
-    _msgHandlerMap.insert({LOGINOUT_MSG,bind(&ChatService::login,this,_1,_2,_3)})
+    _msgHandlerMap.insert({LOGINOUT_MSG,bind(&ChatService::login,this,_1,_2,_3)});
     _msgHandlerMap.insert({REG_MSG,bind(&ChatService::reg,this,_1,_2,_3)});
     _msgHandlerMap.insert({ONE_CHAT_MSG,bind(&ChatService::onechat,this,_1,_2,_3)});
     _msgHandlerMap.insert({ADD_FRIEND_MSG,bind(&ChatService::addfriend,this,_1,_2,_3)});
@@ -26,7 +27,7 @@ ChatService::ChatService(){
 
     if(_redis.connect()){
         //初始化消息回调
-        _redis.init_notify_handler(bind(&ChatService::handleRedisSubscribeMessage,this,_1,_2)); 
+        _redis.init_notify_handler(bind(&ChatService::handleredissubscribemessage,this,_1,_2)); 
     }
 }
 
@@ -102,14 +103,14 @@ void ChatService::login(const TcpConnectionPtr &conn,json &js,Timestamp time){
             }
 
             //查询用户的群组信息
-            vector<Group> GroupuserVec=_groupModel.query(id);
+            vector<Group> GroupuserVec=_groupModel.queryGroups(id);
             if(!GroupuserVec.empty()){
                 vector<string> vec2;
                 for(Group &group:GroupuserVec){ 
                     json grpjson;
-                    js["id"]=group.getId();
-                    js["groupname"]=group.getName();
-                    js["groupdesc"]=group.getDesc();
+                    grpjson["id"]=group.getId();
+                    grpjson["groupname"]=group.getName();
+                    grpjson["groupdesc"]=group.getDesc();
                     vector<string>userV;
                     for(Groupuser &user:group.getUsers()){
                         json userjson;
@@ -203,7 +204,7 @@ void ChatService::clientCloseException(const TcpConnectionPtr &conn){
         }
     }
     //取消订阅通道
-    _redis.unsubscribe(userid); 
+    _redis.unsubscribe(user.getId()); 
 }
 
 //处理一对一聊天业务
@@ -223,7 +224,7 @@ void ChatService::onechat(const TcpConnectionPtr &conn,json &js,Timestamp time){
     User user=_userModel.query(toid);
     if(user.getState()=="online"){
         //toid在线，存储离线消息
-        redis.publish(toid,js.dump());
+        _redis.publish(toid,js.dump());
         return;
     }
     //toid不在线，存储离线消息
@@ -278,7 +279,7 @@ void ChatService::groupchat(const TcpConnectionPtr &conn,json &js,Timestamp time
             User user=_userModel.query(id);
             if(user.getState()=="online"){
                 //toid在线，存储离线消息
-                redis.publish(id,js.dump());
+                _redis.publish(id,js.dump());
             }
             else{
                 //toid不在线，存储离线消息
@@ -286,6 +287,7 @@ void ChatService::groupchat(const TcpConnectionPtr &conn,json &js,Timestamp time
             }
         }
     }
+}
 
     //从redis消息队列中拉取离线消息
     void ChatService::handleredissubscribemessage(int userid,string msg){

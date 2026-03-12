@@ -39,6 +39,6 @@ public:
     //初始化向业务层上报通道消息的回调对象
     void init_notify_handler(function<void(int, string)> fn);
 
-}
+};
 
 #endif
