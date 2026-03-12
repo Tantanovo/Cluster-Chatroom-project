@@ -15,7 +15,7 @@ ChatService::ChatService(){
 
     //用户基本业务管理相关事件处理回调注册
     _msgHandlerMap.insert({LOGIN_MSG,bind(&ChatService::login,this,_1,_2,_3)});
-    _msgHandlerMap.insert({LOGINOUT_MSG,bind(&ChatService::login,this,_1,_2,_3)});
+    _msgHandlerMap.insert({LOGINOUT_MSG,bind(&ChatService::loginout,this,_1,_2,_3)});
     _msgHandlerMap.insert({REG_MSG,bind(&ChatService::reg,this,_1,_2,_3)});
     _msgHandlerMap.insert({ONE_CHAT_MSG,bind(&ChatService::onechat,this,_1,_2,_3)});
     _msgHandlerMap.insert({ADD_FRIEND_MSG,bind(&ChatService::addfriend,this,_1,_2,_3)});
@@ -289,15 +289,15 @@ void ChatService::groupchat(const TcpConnectionPtr &conn,json &js,Timestamp time
     }
 }
 
-    //从redis消息队列中拉取离线消息
-    void ChatService::handleredissubscribemessage(int userid,string msg){
-        lock_guard<mutex> lock(_connMutex);
-        auto it=_userConnMap.find(userid);
-        if(it!=_userConnMap.end()){
-            //转发消息
-            it->second->send(msg);
-            return;
-        }
-        //存储离线消息
-        _offlineMsgModel.insert(userid,msg);
+//从redis消息队列中拉取离线消息
+void ChatService::handleredissubscribemessage(int userid,string msg){
+    lock_guard<mutex> lock(_connMutex);
+    auto it=_userConnMap.find(userid);
+    if(it!=_userConnMap.end()){
+        //转发消息
+        it->second->send(msg);
+        return;
     }
+    //存储离线消息
+    _offlineMsgModel.insert(userid,msg);
+}

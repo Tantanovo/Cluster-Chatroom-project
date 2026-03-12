@@ -17,6 +17,7 @@ using namespace muduo::net;
 #include"usermodel.hpp"
 #include"offlinemessagemodel.hpp"
 //表示处理消息的事件回调方法类型
+//定义了一个名为 MsgHandler 的类型，它专门用来表示 “处理聊天室消息的函数”，任何符合以下特征的函数 / 可调用对象，都可以被归为 MsgHandler 类型：
 using msghandler=function<void(const TcpConnectionPtr &conn,json &js,Timestamp time)>;
 
 //聊天服务器业务类
