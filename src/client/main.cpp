@@ -26,7 +26,7 @@ vector<Group> g_currentUserGroupList;
 //显示当前登录成功用户的基本信息
 void showCurrentUserData();
 //控制主菜单页面程序
-bool isMainMenuRunning=false;
+bool isMainMenuRunning=true;
 
 //接收线程
 void readTaskHandler(int clientfd);

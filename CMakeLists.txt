@@ -11,6 +11,8 @@ include_directories(
     ${PROJECT_SOURCE_DIR}/include/server
     ${PROJECT_SOURCE_DIR}/include/server/mysql
     ${PROJECT_SOURCE_DIR}/include/server/muduo
+    ${PROJECT_SOURCE_DIR}/include/server/redis
+    ${PROJECT_SOURCE_DIR}/include/server/model
     ${PROJECT_SOURCE_DIR}/thirdparty
 )
 add_subdirectory(muduo)
