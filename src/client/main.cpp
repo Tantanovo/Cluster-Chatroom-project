@@ -5,6 +5,7 @@
 #include<vector>
 #include<chrono>
 #include<ctime>
+#include<limits>
 using namespace std;
 using json=nlohmann::json;
 
@@ -73,18 +74,26 @@ int main(int argc,char **argv){
         cout<<"choice:";
         int choice=0;
         cin>>choice;
+        if(cin.fail()){
+            //输入的不是数字，清除错误状态并丢弃缓冲区残留内容，避免死循环
+            cin.clear();
+            cin.ignore(numeric_limits<streamsize>::max(),'\n');
+            cerr<<"invalid input!"<<endl;
+            continue;
+        }
+        cin.ignore(numeric_limits<streamsize>::max(),'\n');
         switch (choice){
             case 1:{//登录业务
-                int id=0;
+                string name="";
                 string password="";
-                cout<<"userid:";
-                cin>>id;
+                cout<<"username:";
+                cin>>name;
                 cout<<"userpassword:";
                 cin>>password;
                 //组织登录json数据
                 json js;    
                 js["msgid"]=LOGIN_MSG;
-                js["id"]=id;
+                js["name"]=name;
                 js["password"]=password;
                 //发送登录数据
                 string request=js.dump();
@@ -130,8 +139,8 @@ int main(int argc,char **argv){
                                     json js=json::parse(str);
                                     Group group;
                                     group.setId(js["id"].get<int>());   
-                                    group.setName(js["name"]);
-                                    group.setDesc(js["desc"]);
+                                    group.setName(js["groupname"]);
+                                    group.setDesc(js["groupdesc"]);
                                     //记录群组的成员信息
                                     if(js.contains("users")){
                                         vector<string> vec2=js["users"].get<vector<string>>();
@@ -213,11 +222,11 @@ int main(int argc,char **argv){
                         json response=json::parse(buffer);
                         if(response["errno"].get<int>()==0){
                             //注册成功
-                            cout<<"register success! userid is "<<response["id"]<<", please remember it!"<<endl;
+                            cout<<"register success! you can login with username \""<<name<<"\" now."<<endl;
                         }
                         else{
-                            //注册失败
-                            cerr<<"register failed! errno is "<<response["errno"].get<int>()<<endl;
+                            //注册失败（多为用户名已被占用）
+                            cerr<<"register failed! username \""<<name<<"\" may already exist, please try another."<<endl;
                         }
                     }
                 }
@@ -347,13 +356,17 @@ void mainMenu(int clientfd){
     for(;;){
         cin.getline(buffer,1024);
         string commandbuf(buffer);
+        if(commandbuf.empty())continue;//忽略空行
         string command;//存储命令
+        string args;//存储命令参数
         int idx=commandbuf.find(":");
         if(idx==-1){
             command=commandbuf;
+            args="";
         }
         else{
             command=commandbuf.substr(0,idx);
+            args=commandbuf.substr(idx+1,commandbuf.size()-idx);
         }
         auto it=commandHandlerMap.find(command);
         if(it==commandHandlerMap.end()){
@@ -361,7 +374,7 @@ void mainMenu(int clientfd){
             continue;
         }
         //调用相应命令的事件处理回调，mainmenu对修改封闭，添加新功能不需要修改该函数
-        it->second(clientfd,commandbuf.substr(idx+1,commandbuf.size()-idx));//调用命令处理方法
+        it->second(clientfd,args);//调用命令处理方法
         
     }
 }
@@ -375,7 +388,17 @@ void help(int,string){
 }
 
 void addfriend(int clientfd,string str){
-    int friendid=stoi(str);
+    if(str.empty()){
+        cerr<<"addfriend command format error! example: addfriend:friendid"<<endl;
+        return;
+    }
+    int friendid=0;
+    try{
+        friendid=stoi(str);
+    }catch(...){
+        cerr<<"addfriend command format error! friendid must be a number"<<endl;
+        return;
+    }
     json js;
     js["msgid"]=ADD_FRIEND_MSG;
     js["id"]=g_currentUser.getId();
@@ -429,7 +452,17 @@ void creategroup(int clientfd,string str){
     }
 }
 void addgroup(int clientfd,string str){
-    int groupid=stoi(str.c_str());
+    if(str.empty()){
+        cerr<<"addgroup command format error! example: addgroup:groupid"<<endl;
+        return;
+    }
+    int groupid=0;
+    try{
+        groupid=stoi(str);
+    }catch(...){
+        cerr<<"addgroup command format error! groupid must be a number"<<endl;
+        return;
+    }
     json js;
     js["msgid"]=ADD_GROUP_MSG;
     js["id"]=g_currentUser.getId();
@@ -447,7 +480,13 @@ void groupchat(int clientfd,string str){
         cerr<<"groupchat command format error!"<<endl;
         return;
     }
-    int groupid=stoi(str.substr(0,idx1));
+    int groupid=0;
+    try{
+        groupid=stoi(str.substr(0,idx1));
+    }catch(...){
+        cerr<<"groupchat command format error! groupid must be a number"<<endl;
+        return;
+    }
     string message=str.substr(idx1+1,str.size()-idx1);
     json js;
     js["msgid"]=GROUP_CHAT_MSG;

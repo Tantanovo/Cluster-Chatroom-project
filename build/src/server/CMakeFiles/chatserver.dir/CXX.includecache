@@ -6,6 +6,8 @@
 
 #IncludeRegexTransform: 
 
+../include/public.hpp
+
 ../include/server/chatserver.hpp
 muduo/net/TcpServer.h
 -
@@ -81,6 +83,14 @@ iostream
 ../include/server/model/usermodel.hpp
 user.hpp
 ../include/server/model/user.hpp
+
+../include/server/mysql/mysql.hpp
+muduo/base/Logging.h
+-
+mysql/mysql.h
+-
+string
+-
 
 ../include/server/redis/redis.hpp
 hiredis/hiredis.h
@@ -420,6 +430,26 @@ limits
 type_traits
 -
 
+/home/yzy/Cluster-Chatroom/Cluster-Chatroom-project/src/server/chatserver.cpp
+chatserver.hpp
+/home/yzy/Cluster-Chatroom/Cluster-Chatroom-project/src/server/chatserver.hpp
+chatservice.hpp
+/home/yzy/Cluster-Chatroom/Cluster-Chatroom-project/src/server/chatservice.hpp
+json.hpp
+/home/yzy/Cluster-Chatroom/Cluster-Chatroom-project/src/server/json.hpp
+
+/home/yzy/Cluster-Chatroom/Cluster-Chatroom-project/src/server/chatservice.cpp
+chatservice.hpp
+/home/yzy/Cluster-Chatroom/Cluster-Chatroom-project/src/server/chatservice.hpp
+string
+-
+muduo/base/Logging.h
+-
+vector
+-
+public.hpp
+/home/yzy/Cluster-Chatroom/Cluster-Chatroom-project/src/server/public.hpp
+
 /home/yzy/Cluster-Chatroom/Cluster-Chatroom-project/src/server/main.cpp
 chatserver.hpp
 /home/yzy/Cluster-Chatroom/Cluster-Chatroom-project/src/server/chatserver.hpp
@@ -428,5 +458,13 @@ chatservice.hpp
 iostream
 -
 signal.h
+-
+
+/home/yzy/Cluster-Chatroom/Cluster-Chatroom-project/src/server/muduo/usermodel.cpp
+usermodel.hpp
+/home/yzy/Cluster-Chatroom/Cluster-Chatroom-project/src/server/muduo/usermodel.hpp
+mysql.hpp
+/home/yzy/Cluster-Chatroom/Cluster-Chatroom-project/src/server/muduo/mysql.hpp
+iostream
 -
 

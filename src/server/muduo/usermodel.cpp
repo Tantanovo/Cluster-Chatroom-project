@@ -41,6 +41,30 @@ User UserModel::query(int id){
     return User();
 }
 
+User UserModel::queryByName(string name){
+    //1 组装sql语句
+    char sql[1024] = {0};
+    sprintf(sql, "select * from User where name='%s'", name.c_str());
+    MySQL mysql;
+    if (mysql.connect()) {
+        MYSQL_RES* res = mysql.query(sql);
+        if (res) {
+            MYSQL_ROW row = mysql_fetch_row(res);
+            if (row) {
+                User user;
+                user.setId(atoi(row[0]));
+                user.setName(row[1]);
+                user.setPassword(row[2]);
+                user.setState(row[3]);
+                mysql_free_result(res);
+                return user;
+            }
+            mysql_free_result(res);
+        }
+    }
+    return User();
+}
+
 bool UserModel::updatestate(User &user){
     //1 组装sql语句
     char sql[1024] = {0};

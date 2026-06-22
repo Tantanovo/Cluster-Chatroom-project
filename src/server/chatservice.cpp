@@ -50,10 +50,11 @@ msghandler ChatService::getHandler(int msgid){
 
 // 处理登录业务
 void ChatService::login(const TcpConnectionPtr &conn,json &js,Timestamp time){
-    int id=js["id"].get<int>();
+    string name=js["name"];
     string password=js["password"];
-    User user=_userModel.query(id);
-    if(user.getId()==id&&user.getPassword()==password){
+    User user=_userModel.queryByName(name);
+    int id=user.getId();
+    if(id!=-1&&user.getPassword()==password){
         if(user.getState()=="online"){
             //该用户已经登录，不能重复登录
             json response;
@@ -209,7 +210,7 @@ void ChatService::clientCloseException(const TcpConnectionPtr &conn){
 
 //处理一对一聊天业务
 void ChatService::onechat(const TcpConnectionPtr &conn,json &js,Timestamp time){
-    int toid=js["to"].get<int>();
+    int toid=js["toid"].get<int>();
     //加锁，保证_userConnMap的线程安全
     {
         lock_guard<mutex> lock(_connMutex);

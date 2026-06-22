@@ -10,6 +10,9 @@ public:
     //根据用户号码查询用户信息
     User query(int id);
 
+    //根据用户名查询用户信息（用于用户名登录）
+    User queryByName(string name);
+
     //更新用户的状态信息
     bool updatestate(User &user);
 
