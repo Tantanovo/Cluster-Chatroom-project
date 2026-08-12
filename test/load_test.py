@@ -14,6 +14,7 @@
 import socket
 import json
 import time
+import struct
 import argparse
 import threading
 import statistics
@@ -28,44 +29,41 @@ def now():
     return time.perf_counter()
 
 
+# 协议：每个请求/响应为 [4字节网络序长度头][JSON body]
+_HEADER = struct.Struct("!I")
+
+
 def send(s, d):
-    s.sendall(json.dumps(d).encode())
+    body = json.dumps(d).encode()
+    s.sendall(_HEADER.pack(len(body)) + body)
 
 
-# 服务器每条响应以 '\x00' 结尾，TCP 可能粘/拆包。
-# 用每连接缓冲区按 '\x00'(或完整 json) 切分，避免并发下的解析错误。
+# 每连接缓冲区，按长度头切帧，处理粘包/拆包
 _RECV_BUF = {}
 
 
-def recv_one(s, bufsize=8192):
-    """读取一条完整 json 响应。以 '\x00' 作为消息边界，缓冲处理粘包/拆包。"""
+def recv_one(s):
+    """读取一条完整 json 响应。按长度头分帧，缓冲处理粘包/拆包。"""
     fd = s.fileno()
-    buf = _RECV_BUF.get(fd, "")
+    buf = _RECV_BUF.get(fd, b"")
     while True:
-        # 缓冲区里已有完整消息？
-        if "\x00" in buf:
-            chunk, buf = buf.split("\x00", 1)
-            _RECV_BUF[fd] = buf
-            chunk = chunk.strip()
-            if not chunk:
-                continue
-            try:
-                return json.loads(chunk)
-            except json.JSONDecodeError:
-                continue
-        # 没有边界，尝试直接解析（服务器有时不带 \x00）
-        if buf.strip():
-            try:
-                obj = json.loads(buf.strip())
-                _RECV_BUF[fd] = ""
-                return obj
-            except json.JSONDecodeError:
-                pass
-        data = s.recv(bufsize)
+        if len(buf) >= 4:
+            body_len = _HEADER.unpack(buf[:4])[0]
+            if body_len == 0 or body_len > 64 * 1024:
+                _RECV_BUF[fd] = b""
+                return None
+            if len(buf) >= 4 + body_len:
+                body = buf[4:4 + body_len]
+                _RECV_BUF[fd] = buf[4 + body_len:]
+                try:
+                    return json.loads(body.decode())
+                except json.JSONDecodeError:
+                    continue
+        data = s.recv(8192)
         if not data:
             _RECV_BUF[fd] = buf
             return None
-        buf += data.decode(errors="ignore")
+        buf += data
 
 
 def close_sock(s):

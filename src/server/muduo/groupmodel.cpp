@@ -1,90 +1,113 @@
 #include"groupmodel.hpp"
-#include"mysql.hpp"
+#include"connectionpool.hpp"
+#include<muduo/base/Logging.h>
+#include<vector>
+using namespace std;
 
-//创建群组
+//创建群组（单条insert）
 bool GroupModel::createGroup(Group &group){
-    //1 组装sql语句
-    char sql[1024] = {0};
-    sprintf(sql, "insert into AllGroup(groupname,groupdesc) values('%s','%s')", group.getName().c_str(), group.getDesc().c_str());
-    MySQL mysql;
-    if (mysql.connect()) {
-        if (mysql.update(sql)) {
-            //获取插入成功的用户数据生成的主键id
-            group.setId(mysql_insert_id(mysql.getConnection()));
-            return true;
-        }
-    }
-    return false;
+    auto conn=ConnectionPool::instance()->getConnection();
+    if(conn==nullptr)return false;
+
+    const string sql="insert into AllGroup(groupname,groupdesc) values(?,?)";
+    if(!conn->executeUpdate(sql,{group.getName(),group.getDesc()}))
+        return false;
+    group.setId(static_cast<int>(conn->lastInsertId()));
+    return true;
 }
+
+//创建群组 + 创建者成员关系：同一个连接、同一个事务
+//改造前：两条独立语句各自提交，第二条失败会留下孤儿群组
+bool GroupModel::createGroupWithCreator(Group &group,int creatorId){
+    auto conn=ConnectionPool::instance()->getConnection();
+    if(conn==nullptr)return false;
+
+    if(!conn->begin())return false;
+
+    bool ok=conn->executeUpdate(
+        "insert into AllGroup(groupname,groupdesc) values(?,?)",
+        {group.getName(),group.getDesc()});
+    if(ok){
+        group.setId(static_cast<int>(conn->lastInsertId()));
+        ok=conn->executeUpdate(
+            "insert into GroupUser(groupid,userid,role) values(?,?,?)",
+            {to_string(group.getId()),to_string(creatorId),"creator"});
+    }
+
+    if(ok){
+        conn->commit();
+    }else{
+        conn->rollback();
+        LOG_ERROR<<"createGroup rolled back, creator="<<creatorId;
+    }
+    return ok;
+}
+
 //加入群组
 void GroupModel::addGroup(int userid,int groupid,string role){
-    //1 组装sql语句
-    char sql[1024] = {0};
-    sprintf(sql, "insert into GroupUser(groupid,userid,role) values(%d,%d,'%s')", groupid, userid, role.c_str());
-    MySQL mysql;
-    if (mysql.connect()) {
-        mysql.update(sql);
-    }
+    auto conn=ConnectionPool::instance()->getConnection();
+    if(conn==nullptr)return;
+
+    const string sql="insert into GroupUser(groupid,userid,role) values(?,?,?)";
+    conn->executeUpdate(sql,{to_string(groupid),to_string(userid),role});
 }
+
 //查询用户所在的群组信息
 vector<Group> GroupModel::queryGroups(int userid){
-    //1.先根据userid在GroupUser表中查询出该用户所属的群组信息
-    //2.再根据群组信息，查询属于该群组的所有用户信息 并且和user表进行多表联合查询
-    char sql[1024] = {0};
-    sprintf(sql, "select a.id,a.groupname,a.groupdesc from AllGroup a inner join GroupUser b on a.id=b.groupid where b.userid=%d", userid);
     vector<Group> vec;
-    MySQL mysql;
-    if (mysql.connect()) {
-        MYSQL_RES* res = mysql.query(sql);
-        if (res != nullptr) {
-            MYSQL_ROW row;
-            while ((row = mysql_fetch_row(res)) != nullptr) {
-                Group group;
-                group.setId(atoi(row[0]));
-                group.setName(row[1]);
-                group.setDesc(row[2]);
-                vec.push_back(group);
-            }
-            mysql_free_result(res);
-        }
+    auto conn=ConnectionPool::instance()->getConnection();
+    if(conn==nullptr)return vec;
+
+    //1.根据userid查出所属群组
+    const string sqlGroups=
+        "select a.id,a.groupname,a.groupdesc "
+        "from AllGroup a inner join GroupUser b on a.id=b.groupid "
+        "where b.userid=?";
+    vector<vector<string>> rows;
+    if(!conn->executeQuery(sqlGroups,{to_string(userid)},rows))return vec;
+
+    for(const auto &row:rows){
+        Group group;
+        group.setId(stoi(row[0]));
+        group.setName(row[1]);
+        group.setDesc(row[2]);
+        vec.push_back(group);
     }
 
-    //查询群组的用户信息
+    //2.再查每个群的所有成员
+    const string sqlUsers=
+        "select a.id,a.name,a.state,b.role "
+        "from User a inner join GroupUser b on a.id=b.userid "
+        "where b.groupid=?";
     for(Group &group:vec){
-        sprintf(sql, "select a.id,a.name,a.state,b.role from User a inner join GroupUser b on a.id=b.userid where b.groupid=%d", group.getId());
-        MYSQL_RES* res = mysql.query(sql);
-        if (res != nullptr) {
-            MYSQL_ROW row;
-            while ((row = mysql_fetch_row(res)) != nullptr) {
-                Groupuser user;
-                user.setId(atoi(row[0]));
-                user.setName(row[1]);
-                user.setState(row[2]);
-                user.setRole(row[3]);
-                group.getUsers().push_back(user);
-            }
-            mysql_free_result(res);
+        vector<vector<string>> memberRows;
+        if(!conn->executeQuery(sqlUsers,{to_string(group.getId())},memberRows))
+            continue;
+        for(const auto &r:memberRows){
+            Groupuser user;
+            user.setId(stoi(r[0]));
+            user.setName(r[1]);
+            user.setState(r[2]);
+            user.setRole(r[3]);
+            group.getUsers().push_back(user);
         }
     }
     return vec;
 }
 
-//根据指定的群组id查询群组用户id列表，除userid自己，主要用于群聊业务给其他成员群发消息
+//查询群组成员id列表，除userid自己，用于群聊给其他成员群发
 vector<int> GroupModel::queryGroupUsers(int userid,int groupid){
-    //1 组装sql语句
-    char sql[1024] = {0};
-    sprintf(sql, "select userid from GroupUser where groupid=%d and userid!=%d", groupid, userid);
     vector<int> vec;
-    MySQL mysql;
-    if (mysql.connect()) {
-        MYSQL_RES* res = mysql.query(sql);
-        if (res != nullptr) {
-            MYSQL_ROW row;
-            while ((row = mysql_fetch_row(res)) != nullptr) {
-                vec.push_back(atoi(row[0]));
-            }
-            mysql_free_result(res);
-        }
-    }
+    auto conn=ConnectionPool::instance()->getConnection();
+    if(conn==nullptr)return vec;
+
+    const string sql=
+        "select userid from GroupUser where groupid=? and userid!=?";
+    vector<vector<string>> rows;
+    if(!conn->executeQuery(sql,{to_string(groupid),to_string(userid)},rows))
+        return vec;
+
+    for(const auto &row:rows)
+        vec.push_back(stoi(row[0]));
     return vec;
 }

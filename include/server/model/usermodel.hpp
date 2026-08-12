@@ -16,7 +16,7 @@ public:
     //更新用户的状态信息
     bool updatestate(User &user);
 
-    //重置用户的状态信息
+    //重置用户的状态信息（服务器优雅退出时调用）
     void resetState();
 };
 

@@ -9,36 +9,33 @@ using json=nlohmann::json;
 using namespace std;
 using namespace muduo;
 using namespace muduo::net;
-#include"redis.hpp"             
+#include"redis.hpp"
 #include"friendmodel.hpp"
 #include"usermodel.hpp"
 #include"offlinemessagemodel.hpp"
 #include"groupmodel.hpp"
-#include"usermodel.hpp"
-#include"offlinemessagemodel.hpp"
 //表示处理消息的事件回调方法类型
-//定义了一个名为 MsgHandler 的类型，它专门用来表示 “处理聊天室消息的函数”，任何符合以下特征的函数 / 可调用对象，都可以被归为 MsgHandler 类型：
 using msghandler=function<void(const TcpConnectionPtr &conn,json &js,Timestamp time)>;
 
 //聊天服务器业务类
 class ChatService{
 private:
     ChatService();//单例模式
-    
+
     //存储消息id和对应的业务处理方法
     unordered_map<int,msghandler> _msgHandlerMap;
-    
+
     //存储在线用户的通信连接
     unordered_map<int,TcpConnectionPtr> _userConnMap;
 
     //定义互斥锁 保证_userConnMap的线程安全
     mutex _connMutex;
 
-    UserModel _userModel;//数据操作类对象
-    OfflineMessageModel _offlineMsgModel;//离线消息业务对象
+    UserModel _userModel;//用户数据操作对象
+    OfflineMessageModel _offlineMsgModel;//离线消息操作对象
     FriendModel _friendModel;//好友信息操作对象
     GroupModel _groupModel;//群组信息操作对象
-    redis _redis;//redis数据库操作对象
+    redis _redis;//redis消息中间件操作对象
 
 public:
     static ChatService* instance();//获取单例对象的接口函数
@@ -52,12 +49,9 @@ public:
     void groupchat(const TcpConnectionPtr &conn,json &js,Timestamp time);//群聊业务
     void loginout(const TcpConnectionPtr &conn,json &js,Timestamp time);//处理注销业务
     void clientCloseException(const TcpConnectionPtr &conn);//客户端异常退出处理
-    void handleredissubscribemessage(int userid,string msg);//从redis消息队列中拉取离线消息
-    void reset();//服务器异常，业务重置方法
+    void handleredissubscribemessage(int userid,string msg);//从redis订阅通道收到跨服务器消息
+    void reset();//服务器退出，业务重置方法
     msghandler getHandler(int msgid);//获取消息对应的处理器
-    
-
-
 };
 
 #endif

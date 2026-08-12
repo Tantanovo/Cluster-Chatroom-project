@@ -1,15 +1,19 @@
 #include"chatservice.hpp"
+#include"chatserver.hpp"
+#include"public.hpp"
+#include"crypto.hpp"
 #include<string>
 #include<muduo/base/Logging.h>
 #include<vector>
-
+#include<mutex>
 using namespace std;
 using namespace muduo;
-#include"public.hpp"
+
 ChatService* ChatService::instance(){
     static ChatService service;
     return &service;
 }
+
 ChatService::ChatService(){
     //注册消息以及对应的Handler
 
@@ -27,12 +31,12 @@ ChatService::ChatService(){
 
     if(_redis.connect()){
         //初始化消息回调
-        _redis.init_notify_handler(bind(&ChatService::handleredissubscribemessage,this,_1,_2)); 
+        _redis.init_notify_handler(bind(&ChatService::handleredissubscribemessage,this,_1,_2));
     }
 }
 
 void ChatService::reset(){
-    //把online状态的用户，设置成offline
+    //把online状态的用户，设置成offline（服务器优雅退出时调用）
     _userModel.resetState();
 }
 
@@ -54,14 +58,17 @@ void ChatService::login(const TcpConnectionPtr &conn,json &js,Timestamp time){
     string password=js["password"];
     User user=_userModel.queryByName(name);
     int id=user.getId();
-    if(id!=-1&&user.getPassword()==password){
+    //改造前：直接比较 user.getPassword()==password（明文）
+    //改造后：比对 SHA-256(salt+password) 与库中哈希
+    if(id!=-1&&crypto::safeEqual(crypto::hashPassword(user.getSalt(),password),
+                                  user.getPassword())){
         if(user.getState()=="online"){
             //该用户已经登录，不能重复登录
             json response;
             response["msgid"]=LOGIN_ACK_MSG;
             response["errno"]=2;
             response["errmsg"]="该账号已经登录，不能重复登录";
-            conn->send(response.dump());
+            ChatServer::sendWithHeader(conn,response.dump());
             return;
         }
         else{
@@ -71,8 +78,8 @@ void ChatService::login(const TcpConnectionPtr &conn,json &js,Timestamp time){
                 _userConnMap.insert({id,conn});
             }
             //将用户id和通道号绑定，用于后续的消息推送
-            _redis.subscribe(id);   
-            
+            _redis.subscribe(id);
+
             //登录成功 更新用户状态信息 state offline=>online
             user.setState("online");
             _userModel.updatestate(user);
@@ -107,7 +114,7 @@ void ChatService::login(const TcpConnectionPtr &conn,json &js,Timestamp time){
             vector<Group> GroupuserVec=_groupModel.queryGroups(id);
             if(!GroupuserVec.empty()){
                 vector<string> vec2;
-                for(Group &group:GroupuserVec){ 
+                for(Group &group:GroupuserVec){
                     json grpjson;
                     grpjson["id"]=group.getId();
                     grpjson["groupname"]=group.getName();
@@ -120,13 +127,13 @@ void ChatService::login(const TcpConnectionPtr &conn,json &js,Timestamp time){
                         userjson["state"]=user.getState();
                         userjson["role"]=user.getRole();
                         userV.push_back(userjson.dump());
-                    } 
+                    }
                     grpjson["users"]=userV;
                     vec2.push_back(grpjson.dump());
                 }
                 response["groups"]=vec2;
             }
-            conn->send(response.dump());
+            ChatServer::sendWithHeader(conn,response.dump());
         }
     }
     else{
@@ -135,7 +142,7 @@ void ChatService::login(const TcpConnectionPtr &conn,json &js,Timestamp time){
         response["msgid"]=LOGIN_ACK_MSG;
         response["errno"]=1;
         response["errmsg"]="用户名或密码错误";
-        conn->send(response.dump());
+        ChatServer::sendWithHeader(conn,response.dump());
     }
     LOG_INFO<<"do login service!";
 }
@@ -154,15 +161,15 @@ void ChatService::reg(const TcpConnectionPtr &conn,json &js,Timestamp time){
         response["msgid"]=REG_ACK_MSG;
         response["id"]=user.getId();
         response["errno"]=0;
-        conn->send(response.dump());
-        
+        ChatServer::sendWithHeader(conn,response.dump());
+
     }
     else{
         //注册失败
         json response;
         response["msgid"]=REG_ACK_MSG;
         response["errno"]=1;
-        conn->send(response.dump());
+        ChatServer::sendWithHeader(conn,response.dump());
     }
 }
 
@@ -175,37 +182,41 @@ void ChatService::loginout(const TcpConnectionPtr &conn,json &js,Timestamp time)
         if(it!=_userConnMap.end()){
             //从map表删除用户的连接信息
             _userConnMap.erase(it);
-            //更新用户的状态信息为offline
         }
     }
     //取消订阅通道
-    _redis.unsubscribe(userid); 
+    _redis.unsubscribe(userid);
 
     //更新用户的状态信息为offline
     User user(userid,"","offline");
     _userModel.updatestate(user);
 }
 
-//处理客户端异常退出
+//处理客户端异常退出（连接断开时由网络层回调触发）
 void ChatService::clientCloseException(const TcpConnectionPtr &conn){
-    
-    //遍历_userConnMap表，找到连接对应的用户id
-    lock_guard<mutex> lock(_connMutex);
-    User user;
-    for(auto it=_userConnMap.begin();it!=_userConnMap.end();++it){
-        if(it->second==conn){
-            //从map表删除用户的连接信息
-            user.setId(it->first);
-            _userConnMap.erase(it);
-            //更新用户的状态信息为offline
-            User user=_userModel.query(it->first);
-            user.setState("offline");
-            _userModel.updatestate(user);
-            break;
+    int userid=-1;
+    {
+        lock_guard<mutex> lock(_connMutex);
+        //遍历_userConnMap表，找到连接对应的用户id
+        for(auto it=_userConnMap.begin();it!=_userConnMap.end();++it){
+            if(it->second==conn){
+                userid=it->first;
+                _userConnMap.erase(it);
+                break;
+            }
         }
     }
+    if(userid==-1)return;//该连接不是登录用户的连接，无需清理
+
+    //更新用户的状态信息为offline
+    User user=_userModel.query(userid);
+    if(user.getId()!=-1){
+        user.setState("offline");
+        _userModel.updatestate(user);
+    }
     //取消订阅通道
-    _redis.unsubscribe(user.getId()); 
+    _redis.unsubscribe(userid);
+    LOG_INFO<<"client close, userid="<<userid<<" set offline";
 }
 
 //处理一对一聊天业务
@@ -216,15 +227,15 @@ void ChatService::onechat(const TcpConnectionPtr &conn,json &js,Timestamp time){
         lock_guard<mutex> lock(_connMutex);
         auto it=_userConnMap.find(toid);
         if(it!=_userConnMap.end()){
-            //toid在线，转发消息 服务器主动推送消息给told用户
-            it->second->send(js.dump());
+            //toid在本节点在线，服务器主动推送消息给toid用户
+            ChatServer::sendWithHeader(it->second,js.dump());
             return;
         }
     }
     //查询toid是否在线
     User user=_userModel.query(toid);
     if(user.getState()=="online"){
-        //toid在线，存储离线消息
+        //toid在线但在其他服务器节点，通过redis发布订阅转发
         _redis.publish(toid,js.dump());
         return;
     }
@@ -246,12 +257,10 @@ void ChatService::creategroup(const TcpConnectionPtr &conn,json &js,Timestamp ti
     int userid=js["id"].get<int>();
     string groupname=js["groupname"];
     string groupdesc=js["groupdesc"];
-    //存储新创建的群组信息
+    //改造前：先createGroup再addGroup，两条独立语句，第二条失败会留下孤儿群组
+    //改造后：两条insert包在同一个事务里，失败整体回滚
     Group group(-1,groupname,groupdesc);
-    if(_groupModel.createGroup(group)){
-        //存储群组创建人信息
-        _groupModel.addGroup(userid,group.getId(),"creator");
-    }
+    _groupModel.createGroupWithCreator(group,userid);
 }
 
 //加入群组业务
@@ -267,38 +276,39 @@ void ChatService::groupchat(const TcpConnectionPtr &conn,json &js,Timestamp time
     int groupid=js["groupid"].get<int>();
     //查询群组成员列表，除userid自己外，其他成员转发消息
     vector<int> useridVec=_groupModel.queryGroupUsers(userid,groupid);
-    lock_guard<mutex> lock(_connMutex);
-    for(int id:useridVec){
-        //加锁，保证_userConnMap的线程安全        
-        auto it=_userConnMap.find(id);
-        if(it!=_userConnMap.end()){
-            //转发消息
-            it->second->send(js.dump());
-        }
-        else{
-            //查询toid是否在线
-            User user=_userModel.query(id);
-            if(user.getState()=="online"){
-                //toid在线，存储离线消息
-                _redis.publish(id,js.dump());
+    {
+        lock_guard<mutex> lock(_connMutex);
+        for(int id:useridVec){
+            auto it=_userConnMap.find(id);
+            if(it!=_userConnMap.end()){
+                //本节点在线，直接推送
+                ChatServer::sendWithHeader(it->second,js.dump());
             }
             else{
-                //toid不在线，存储离线消息
-                _offlineMsgModel.insert(id,js.dump());
+                //查询toid是否在线
+                User user=_userModel.query(id);
+                if(user.getState()=="online"){
+                    //在其他节点在线，redis转发
+                    _redis.publish(id,js.dump());
+                }
+                else{
+                    //不在线，存储离线消息
+                    _offlineMsgModel.insert(id,js.dump());
+                }
             }
         }
     }
 }
 
-//从redis消息队列中拉取离线消息
+//从redis订阅通道收到跨服务器消息，投递给本节点的目标用户
 void ChatService::handleredissubscribemessage(int userid,string msg){
     lock_guard<mutex> lock(_connMutex);
     auto it=_userConnMap.find(userid);
     if(it!=_userConnMap.end()){
         //转发消息
-        it->second->send(msg);
+        ChatServer::sendWithHeader(it->second,msg);
         return;
     }
-    //存储离线消息
+    //目标用户恰好不在本节点（如刚好断开），存储离线消息
     _offlineMsgModel.insert(userid,msg);
 }

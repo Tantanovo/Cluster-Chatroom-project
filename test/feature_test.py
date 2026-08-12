@@ -4,6 +4,7 @@
 import socket
 import json
 import time
+import struct
 import sys
 
 HOST, PORT = "127.0.0.1", 6000
@@ -11,6 +12,9 @@ HOST, PORT = "127.0.0.1", 6000
 # 消息类型（与 public.hpp 一致）
 LOGIN, LOGIN_ACK, LOGINOUT, REG, REG_ACK = 1, 2, 3, 4, 5
 ONE_CHAT, ADD_FRIEND, CREATE_GROUP, ADD_GROUP, GROUP_CHAT = 6, 7, 8, 9, 10
+
+# 协议：每个请求/响应为 [4字节网络序长度头][JSON body]
+_HEADER = struct.Struct("!I")
 
 PASS, FAIL = 0, 0
 def check(name, cond, extra=""):
@@ -28,21 +32,32 @@ def conn():
     return s
 
 def send(s, d):
-    s.sendall(json.dumps(d).encode())
+    body = json.dumps(d).encode()
+    s.sendall(_HEADER.pack(len(body)) + body)
 
 def recv(s):
-    """读取一条响应并解析为 json，超时返回 None。"""
+    """读取一条完整 json 响应。按长度头分帧。"""
     try:
-        data = s.recv(8192)
-        if not data:
+        hdr = b""
+        while len(hdr) < 4:
+            chunk = s.recv(4 - len(hdr))
+            if not chunk:
+                return None
+            hdr += chunk
+        body_len = _HEADER.unpack(hdr)[0]
+        if body_len == 0 or body_len > 64 * 1024:
             return None
-        # 去掉可能的结尾空字符
-        txt = data.decode(errors="ignore").rstrip("\x00").strip()
-        return json.loads(txt)
+        body = b""
+        while len(body) < body_len:
+            chunk = s.recv(body_len - len(body))
+            if not chunk:
+                return None
+            body += chunk
+        return json.loads(body.decode())
     except socket.timeout:
         return None
     except json.JSONDecodeError as e:
-        print(f"    (json解析失败: {e}  原始={data!r})")
+        print(f"    (json解析失败: {e})")
         return None
 
 def reg(s, name, pwd):

@@ -25,6 +25,9 @@ dump.rdb
 *.rdb
 *.log
 
+# 数据库凭据（含真实密码，绝不提交）
+conf/mysql.cnf
+
 # 编辑器 / 系统
 .vscode/
 .idea/

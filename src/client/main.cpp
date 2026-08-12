@@ -6,6 +6,7 @@
 #include<chrono>
 #include<ctime>
 #include<limits>
+#include<mutex>
 using namespace std;
 using json=nlohmann::json;
 
@@ -18,6 +19,63 @@ using json=nlohmann::json;
 #include"user.hpp"
 #include"public.hpp"
 
+//=================== 协议层：与服务器保持一致 ===================
+//帧格式：[4字节网络序长度头][JSON body]
+//改造前客户端直接send裸JSON，与服务器一样存在粘包/半包问题。
+//现在统一封装 sendFrame / recvFrame。
+//---------------------------------------------------------------
+static const size_t kHeaderLen=4;
+static const uint32_t kMaxFrameLen=64*1024;
+
+//发送一帧：序列化json -> 加长度头 -> 一次sendall
+bool sendFrame(int clientfd,const json &js){
+    string body=js.dump();
+    uint32_t beLen=htonl(static_cast<uint32_t>(body.size()));
+    string frame;
+    frame.reserve(kHeaderLen+body.size());
+    frame.append(reinterpret_cast<const char*>(&beLen),kHeaderLen);
+    frame.append(body);
+    size_t sent=0;
+    while(sent<frame.size()){
+        ssize_t n=send(clientfd,frame.data()+sent,frame.size()-sent,0);
+        if(n<=0)return false;
+        sent+=static_cast<size_t>(n);
+    }
+    return true;
+}
+
+//接收缓冲：处理粘包/半包（一条recv可能含多帧或半帧）
+string g_recvBuf;
+mutex g_recvMutex;
+
+//读取一帧完整body，返回false表示连接断开或帧非法
+bool recvFrame(int clientfd,string &body){
+    lock_guard<mutex> lock(g_recvMutex);
+    for(;;){
+        //缓冲区内已有完整帧？先处理
+        if(g_recvBuf.size()>=kHeaderLen){
+            uint32_t beLen=0;
+            memcpy(&beLen,g_recvBuf.data(),kHeaderLen);
+            const uint32_t bodyLen=ntohl(beLen);
+            if(bodyLen==0||bodyLen>kMaxFrameLen){
+                g_recvBuf.clear();
+                return false;
+            }
+            if(g_recvBuf.size()>=kHeaderLen+bodyLen){
+                body.assign(g_recvBuf.data()+kHeaderLen,bodyLen);
+                g_recvBuf.erase(0,kHeaderLen+bodyLen);
+                return true;
+            }
+        }
+        //缓冲区不足一帧，继续recv
+        char tmp[4096];
+        ssize_t n=recv(clientfd,tmp,sizeof(tmp),0);
+        if(n<=0)return false;
+        g_recvBuf.append(tmp,static_cast<size_t>(n));
+    }
+}
+
+//=================== 业务逻辑 ===================
 //记录当前系统登录的用户信息
 User g_currentUser;
 //记录当前系统登录用户的好友列表信息
@@ -58,7 +116,7 @@ int main(int argc,char **argv){
     serveraddr.sin_port=htons(port);
     serveraddr.sin_addr.s_addr=inet_addr(ip);
     //连接服务器
-    if(connect(clientfd,(struct sockaddr*)&serveraddr,sizeof(serveraddr))==-1){ 
+    if(connect(clientfd,(struct sockaddr*)&serveraddr,sizeof(serveraddr))==-1){
         cerr<<"connect server error!"<<endl;
         close(clientfd);
         exit(-1);
@@ -91,26 +149,23 @@ int main(int argc,char **argv){
                 cout<<"userpassword:";
                 cin>>password;
                 //组织登录json数据
-                json js;    
+                json js;
                 js["msgid"]=LOGIN_MSG;
                 js["name"]=name;
                 js["password"]=password;
                 //发送登录数据
-                string request=js.dump();
-                int len=send(clientfd,request.c_str(),strlen(request.c_str())+1,0);
-                if(len==-1){
-                    cerr<<"send login msg error:"<<request<<endl;
+                if(!sendFrame(clientfd,js)){
+                    cerr<<"send login msg error!"<<endl;
                 }
                 else{
                     //接收服务器响应数据
-                    char buffer[1024]={0};
-                    int len=recv(clientfd,buffer,1024,0);
-                    if(len==-1){
+                    string responseStr;
+                    if(!recvFrame(clientfd,responseStr)){
                         cerr<<"recv login response error!"<<endl;
                     }
                     else{
                         //解析响应数据
-                        json response=json::parse(buffer);
+                        json response=json::parse(responseStr);
                         if(response["errno"].get<int>()==0){
                             //登录成功
                             g_currentUser.setId(response["id"].get<int>());
@@ -138,7 +193,7 @@ int main(int argc,char **argv){
                                 for(string &str:vec){
                                     json js=json::parse(str);
                                     Group group;
-                                    group.setId(js["id"].get<int>());   
+                                    group.setId(js["id"].get<int>());
                                     group.setName(js["groupname"]);
                                     group.setDesc(js["groupdesc"]);
                                     //记录群组的成员信息
@@ -179,7 +234,7 @@ int main(int argc,char **argv){
                                 thread readTask(readTaskHandler,clientfd);
                                 readTask.detach();
                                 threadnumber++;
-                            }   
+                            }
                             //进入主聊天页面
                             isMainMenuRunning=true;
                             mainMenu(clientfd);
@@ -200,26 +255,23 @@ int main(int argc,char **argv){
                 cout<<"userpassword:";
                 cin>>password;
                 //组织注册json数据
-                json js;    
+                json js;
                 js["msgid"]=REG_MSG;
                 js["name"]=name;
                 js["password"]=password;
                 //发送注册数据
-                string request=js.dump();
-                int len=send(clientfd,request.c_str(),strlen(request.c_str())+1,0);
-                if(len==-1){
-                    cerr<<"send reg msg error:"<<request<<endl;
+                if(!sendFrame(clientfd,js)){
+                    cerr<<"send reg msg error!"<<endl;
                 }
                 else{
                     //接收服务器响应数据
-                    char buffer[1024]={0};
-                    int len=recv(clientfd,buffer,1024,0);
-                    if(len==-1){
-                        cerr<<"recv reg response error!"<<endl; 
+                    string responseStr;
+                    if(!recvFrame(clientfd,responseStr)){
+                        cerr<<"recv reg response error!"<<endl;
                     }
                     else{
                         //解析响应数据
-                        json response=json::parse(buffer);
+                        json response=json::parse(responseStr);
                         if(response["errno"].get<int>()==0){
                             //注册成功
                             cout<<"register success! you can login with username \""<<name<<"\" now."<<endl;
@@ -237,7 +289,7 @@ int main(int argc,char **argv){
                 isMainMenuRunning=false;
                 break;
             }
-            default:    
+            default:
                 cerr<<"invalid input!"<<endl;
                 break;
         }
@@ -248,14 +300,13 @@ int main(int argc,char **argv){
 //接收线程
 void readTaskHandler(int clientfd){
     for(;;){
-        char buffer[1024]={0};
-        int len=recv(clientfd,buffer,1024,0);//阻塞了
-        if(len==-1||len==0){
+        string body;
+        if(!recvFrame(clientfd,body)){
             close(clientfd);
             exit(-1);
         }
         //接收chatserver转发的数据，反序列化生成json数据对象
-        json js=json::parse(buffer);
+        json js=json::parse(body);
         int msgtype=js["msgid"].get<int>();
         if(ONE_CHAT_MSG==msgtype){
             cout<<js["time"].get<string>()<<"["<<js["id"]<<"]"<<js["name"].get<string>()<<"said:"<<js["msg"].get<string>()<<endl;
@@ -274,12 +325,12 @@ void readTaskHandler(int clientfd){
             else{
                 cout<<js["name"].get<string>()<<"is loginout success!"<<endl;
                 continue;
-            }   
+            }
         }
         else{
             cout<<"recv unknown msgtype:"<<msgtype<<endl;
         }
-    }   
+    }
 }
 //显示当前登录成功用户的基本信息
 void showCurrentUserData(){
@@ -375,7 +426,7 @@ void mainMenu(int clientfd){
         }
         //调用相应命令的事件处理回调，mainmenu对修改封闭，添加新功能不需要修改该函数
         it->second(clientfd,args);//调用命令处理方法
-        
+
     }
 }
 
@@ -403,10 +454,8 @@ void addfriend(int clientfd,string str){
     js["msgid"]=ADD_FRIEND_MSG;
     js["id"]=g_currentUser.getId();
     js["friendid"]=friendid;
-    string buffer=js.dump();
-    int len=send(clientfd,buffer.c_str(),strlen(buffer.c_str())+1,0);
-    if(len==-1){
-        cerr<<"send addfriend msg error:"<<buffer<<endl;    
+    if(!sendFrame(clientfd,js)){
+        cerr<<"send addfriend msg error!"<<endl;
     }
 }
 
@@ -425,10 +474,8 @@ void chat(int clientfd,string str){
     js["toid"]=friendid;
     js["msg"]=message;
     js["time"]=getCurrentTime();
-    string buffer=js.dump();
-    int len=send(clientfd,buffer.c_str(),strlen(buffer.c_str())+1,0);
-    if(len==-1){
-        cerr<<"send chat msg error:"<<buffer<<endl;    
+    if(!sendFrame(clientfd,js)){
+        cerr<<"send chat msg error!"<<endl;
     }
 }
 
@@ -445,10 +492,8 @@ void creategroup(int clientfd,string str){
     js["id"]=g_currentUser.getId();
     js["groupname"]=groupname;
     js["groupdesc"]=groupdesc;
-    string buffer=js.dump();
-    int len=send(clientfd,buffer.c_str(),strlen(buffer.c_str())+1,0);
-    if(len==-1){
-        cerr<<"send addgroup msg error:"<<buffer<<endl;    
+    if(!sendFrame(clientfd,js)){
+        cerr<<"send creategroup msg error!"<<endl;
     }
 }
 void addgroup(int clientfd,string str){
@@ -467,10 +512,8 @@ void addgroup(int clientfd,string str){
     js["msgid"]=ADD_GROUP_MSG;
     js["id"]=g_currentUser.getId();
     js["groupid"]=groupid;
-    string buffer=js.dump();
-    int len=send(clientfd,buffer.c_str(),strlen(buffer.c_str())+1,0);
-    if(len==-1){
-        cerr<<"send addgroup msg error:"<<buffer<<endl;    
+    if(!sendFrame(clientfd,js)){
+        cerr<<"send addgroup msg error!"<<endl;
     }
 }
 
@@ -495,10 +538,8 @@ void groupchat(int clientfd,string str){
     js["groupid"]=groupid;
     js["msg"]=message;
     js["time"]=getCurrentTime();
-    string buffer=js.dump();
-    int len=send(clientfd,buffer.c_str(),strlen(buffer.c_str())+1,0);
-    if(len==-1){
-        cerr<<"send groupchat msg error:"<<buffer<<endl;    
+    if(!sendFrame(clientfd,js)){
+        cerr<<"send groupchat msg error!"<<endl;
     }
 }
 
@@ -506,10 +547,8 @@ void loginout(int clientfd,string str){
     json js;
     js["msgid"]=LOGINOUT_MSG;
     js["id"]=g_currentUser.getId();
-    string buffer=js.dump();
-    int len=send(clientfd,buffer.c_str(),strlen(buffer.c_str())+1,0);
-    if(len==-1){
-        cerr<<"send loginout msg error:"<<buffer<<endl;    
+    if(!sendFrame(clientfd,js)){
+        cerr<<"send loginout msg error!"<<endl;
     }
     else{
         isMainMenuRunning=false;

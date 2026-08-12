@@ -1,0 +1,14 @@
+# MySQL 连接池配置示例
+# 复制为 conf/mysql.cnf 后按需修改（conf/mysql.cnf 已在 .gitignore 中，不会提交）
+# 也可以全部用环境变量覆盖：CHAT_DB_HOST / CHAT_DB_USER / CHAT_DB_PASSWD / CHAT_DB_NAME
+
+host=127.0.0.1
+port=3306
+user=your_user
+password=your_password
+dbname=chat
+
+# 连接池参数
+initSize=10
+maxSize=64
+maxIdleTime=60
