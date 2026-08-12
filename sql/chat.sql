@@ -47,9 +47,13 @@ create table GroupUser (
 ) engine=InnoDB default charset=utf8mb4 comment '群组成员表';
 
 -- 离线消息表
+-- convid/seq 冗余存储：便于按会话查询与排序补投，也便于排查消息顺序问题
 create table OfflineMessage (
     id      int primary key auto_increment,
     userid  int not null,
+    convid  varchar(64) not null default '' comment '会话ID，见 conversation.hpp',
+    seq     bigint unsigned not null default 0 comment '会话内消息序号',
     message varchar(5000) not null comment 'JSON格式的未读消息',
-    key idx_userid (userid)
+    key idx_userid (userid),
+    key idx_user_conv_seq (userid, convid, seq) comment '按会话有序补投'
 ) engine=InnoDB default charset=utf8mb4 comment '离线消息表';

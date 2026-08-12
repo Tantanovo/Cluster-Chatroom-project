@@ -17,3 +17,5 @@ include_directories(
 add_subdirectory(muduo)
 #加载子目录
 add_subdirectory(src)
+#单元测试（不依赖第三方库，可独立编译）
+add_subdirectory(test)

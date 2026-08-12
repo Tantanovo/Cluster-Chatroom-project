@@ -4,6 +4,8 @@
 #include<unordered_map>
 #include<functional>
 #include<mutex>
+#include<vector>
+#include<string>
 #include"json.hpp"
 using json=nlohmann::json;
 using namespace std;
@@ -52,6 +54,10 @@ public:
     void handleredissubscribemessage(int userid,string msg);//从redis订阅通道收到跨服务器消息
     void reset();//服务器退出，业务重置方法
     msghandler getHandler(int msgid);//获取消息对应的处理器
+
+private:
+    //把离线消息按 (convid, seq) 升序排列后再下发，保证补投顺序正确
+    static void sortOfflineMessages(vector<string> &msgs);
 };
 
 #endif

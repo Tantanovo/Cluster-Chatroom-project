@@ -18,6 +18,8 @@ using json=nlohmann::json;
 #include"group.hpp"
 #include"user.hpp"
 #include"public.hpp"
+#include"conversation.hpp"
+#include"conversation_orderer.hpp"
 
 //=================== 协议层：与服务器保持一致 ===================
 //帧格式：[4字节网络序长度头][JSON body]
@@ -86,6 +88,13 @@ vector<Group> g_currentUserGroupList;
 void showCurrentUserData();
 //控制主菜单页面程序
 bool isMainMenuRunning=true;
+
+//渲染一条聊天消息（由重排器在确认顺序后回调）
+void renderChatMessage(const json &js);
+
+//会话内消息重排器：保证同一会话的消息按服务端分配的seq顺序展示
+//（跨会话不排序，各会话互不阻塞）
+ConversationOrderer g_orderer(renderChatMessage);
 
 //接收线程
 void readTaskHandler(int clientfd);
@@ -216,17 +225,22 @@ int main(int argc,char **argv){
                             showCurrentUserData();
 
                             //显示当前用户的离线消息  个人聊天信息或者群组消息
+                            //【有序性】服务端已按 (convid,seq) 排序下发，
+                            //这里仍统一走重排器，让它建立每个会话的 expectSeq 基线，
+                            //这样后续实时消息才能正确判断连续/重复/空洞。
                             if(response.contains("offlinemsg")){
                                 vector<string> vec=response["offlinemsg"].get<vector<string>>();
+                                vector<json> offline;
+                                offline.reserve(vec.size());
                                 for(string &str:vec){
-                                    json js=json::parse(str);
-                                    if(ONE_CHAT_MSG==js["msgid"].get<int>()){
-                                        cout<<js["time"].get<string>()<<"["<<js["id"]<<"]"<<js["name"].get<string>()<<"said:"<<js["msg"].get<string>()<<endl;
-                                    }
-                                    else if(GROUP_CHAT_MSG==js["msgid"].get<int>()){
-                                        cout<<js["time"].get<string>()<<"["<<js["id"]<<"]"<<js["name"].get<string>()<<"in group["<<js["groupid"].get<int>()<<"]said:"<<js["msg"].get<string>()<<endl;
+                                    try{
+                                        offline.push_back(json::parse(str));
+                                    }catch(const json::exception &){
+                                        //跳过损坏的历史离线消息
                                     }
                                 }
+                                cout<<"------------- offline messages ("<<offline.size()<<") -------------"<<endl;
+                                g_orderer.onOfflineBatch(offline);
                             }
                             //登陆成功，启动接收线程负责接收数据 该线程只启动一次
                             static int threadnumber=0;
@@ -297,6 +311,24 @@ int main(int argc,char **argv){
     return 0;
 }
 
+//渲染一条聊天消息。只有经过重排器确认顺序后才会走到这里。
+//带上 seq 打印，便于肉眼验证消息在会话内是严格连续的。
+void renderChatMessage(const json &js){
+    const int msgtype=js.value("msgid",0);
+    const unsigned long long seq=js.value("seq",0ULL);
+    if(ONE_CHAT_MSG==msgtype){
+        cout<<js["time"].get<string>()<<" [#"<<seq<<"]"
+            <<"["<<js["id"]<<"]"<<js["name"].get<string>()
+            <<" said:"<<js["msg"].get<string>()<<endl;
+    }
+    else if(GROUP_CHAT_MSG==msgtype){
+        cout<<js["time"].get<string>()<<" [#"<<seq<<"]"
+            <<"["<<js["id"]<<"]"<<js["name"].get<string>()
+            <<" in group["<<js["groupid"].get<int>()<<"]"
+            <<" said:"<<js["msg"].get<string>()<<endl;
+    }
+}
+
 //接收线程
 void readTaskHandler(int clientfd){
     for(;;){
@@ -305,15 +337,22 @@ void readTaskHandler(int clientfd){
             close(clientfd);
             exit(-1);
         }
-        //接收chatserver转发的数据，反序列化生成json数据对象
-        json js=json::parse(body);
-        int msgtype=js["msgid"].get<int>();
-        if(ONE_CHAT_MSG==msgtype){
-            cout<<js["time"].get<string>()<<"["<<js["id"]<<"]"<<js["name"].get<string>()<<"said:"<<js["msg"].get<string>()<<endl;
+        //每次循环先驱动一次超时检查：
+        //若某会话的空洞已等待超时，强制放行缓存消息，避免永久卡住
+        g_orderer.tick();
+
+        json js;
+        try{
+            js=json::parse(body);
+        }catch(const json::exception &e){
+            cerr<<"recv invalid json, ignored: "<<e.what()<<endl;
             continue;
         }
-        else if(GROUP_CHAT_MSG==msgtype){
-            cout<<js["time"].get<string>()<<"["<<js["id"]<<"]"<<js["name"].get<string>()<<"in group["<<js["groupid"].get<int>()<<"]said:"<<js["msg"].get<string>()<<endl;
+        const int msgtype=js.value("msgid",0);
+
+        if(ONE_CHAT_MSG==msgtype||GROUP_CHAT_MSG==msgtype){
+            //聊天消息交给重排器：它负责去重、补洞、按会话恢复顺序
+            g_orderer.onMessage(js);
             continue;
         }
         else if(LOGINOUT_MSG==msgtype){
